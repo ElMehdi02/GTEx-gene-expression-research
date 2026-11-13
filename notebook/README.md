@@ -1,69 +1,83 @@
-# GTEx Gene Expression Research
+# GTEx Data Analysis Process
 
-## Overview
+This file explains how I am analyzing the GTEx gene expression dataset and how the research papers I am reading are helping me build the analysis.
 
-This project analyzes gene expression across human tissues using data from the **Genotype-Tissue Expression (GTEx) Project**.
+The main notebook for this work is:
 
-The main goal is to study the relationship between genes and tissues and determine which tissues are most strongly associated with a selected group of genes.
+`data_exploration1.ipynb`
 
-The project uses median TPM gene expression values from GTEx and converts them into relative expression values so that genes with very high overall expression do not automatically have more influence than genes with lower overall expression.
-
-The analysis is being developed in Python using Jupyter Notebook and VS Code.
+The goal of this analysis is to understand how genes are connected to different human tissues using GTEx gene expression data.
 
 ---
 
-## Dataset
+## Research Papers I Am Using
 
-The dataset used in this project is:
+I am using two Enrichr research papers to understand how gene-set enrichment analysis works and how gene expression can be connected to biological terms such as tissues.
 
-`GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_median_tpm.gct.gz`
+### 1. Enrichr: Interactive and Collaborative HTML5 Gene List Enrichment Analysis Tool
 
-The data contains:
+Chen et al., 2013.
 
-- Ensembl gene IDs
-- Gene names
-- 68 tissue and cell-type columns
-- Median TPM expression values for each gene-tissue pair
+This paper explains how Enrichr takes a list of genes and compares it with existing gene-set libraries.
 
-The structure of the data is approximately:
+The paper uses different methods to measure enrichment, including:
+
+- Fisher exact test
+- expected-rank correction
+- Z-score
+- combined score
+
+The main idea I am using from this paper is that a group of genes can be analyzed together to find biological signals that are more represented than expected.
+
+---
+
+### 2. Enrichr: A Comprehensive Gene Set Enrichment Analysis Web Server 2016 Update
+
+Kuleshov et al., 2016.
+
+This paper expands the Enrichr method and adds more gene-set libraries, including gene expression information from GTEx.
+
+Another important idea in this paper is **fuzzy membership**.
+
+Instead of only saying:
 
 ```text
-Gene ID | Gene Name | Tissue 1 | Tissue 2 | Tissue 3 | ...
+0 = gene is not connected
+1 = gene is connected
 ```
 
-Each row represents one gene, and each tissue column contains the median TPM expression value for that gene.
-
-The raw GTEx data is not uploaded to this repository because the `data/` folder is ignored by Git.
-
----
-
-## What is TPM?
-
-TPM stands for **Transcripts Per Million**.
-
-TPM is a normalized measurement used to represent gene expression. In simple terms, a larger TPM value means that a gene has a higher level of expression in that tissue.
+a gene can have a value between 0 and 1.
 
 For example:
 
 ```text
-Gene A
-
-Brain = 10 TPM
-Liver = 30 TPM
-Heart = 10 TPM
+Gene A = 0.80
+Gene B = 0.30
+Gene C = 0.05
 ```
 
-This tells us that Gene A has higher expression in the liver compared with the brain and heart.
+This allows the strength of the relationship to also be included in the analysis.
+
+This idea is useful for my project because I am also converting the GTEx gene expression values into relative values between 0 and 1.
 
 ---
 
-## Current Analysis
+# My Analysis Process
 
-### 1. Load the GTEx Data
+## 1. Load the GTEx Dataset
 
-The GTEx `.gct.gz` file is loaded using Pandas.
+I started by loading the GTEx median TPM dataset using Pandas.
 
-Because GCT files contain two metadata rows before the real table header, the first two rows are skipped.
+The file contains:
+
+- gene IDs
+- gene names
+- tissue names
+- median TPM values
+
+Each row represents a gene and each tissue column contains the expression of that gene in that tissue.
+
+The first two rows of the GCT file contain information about the file, so I skip them when loading the data.
 
 ```python
 df = pd.read_csv(
@@ -75,28 +89,36 @@ df = pd.read_csv(
 
 ---
 
-### 2. Identify Gene and Tissue Columns
+## 2. Identify the Tissue Columns
 
-The first two columns contain gene information:
+The first two columns contain information about the genes:
 
 ```text
 Name
 Description
 ```
 
-The remaining columns contain tissue expression values.
+The remaining columns are the tissues.
+
+I selected the tissue columns using:
 
 ```python
 tissue_cols = df.columns[2:]
 ```
 
-This gives the list of tissues that will be used in the analysis.
+This allows me to work only with the expression values when I need to perform calculations.
 
 ---
 
-### 3. Create the Gene-Tissue Table
+## 3. Create a Gene-Tissue Table
 
-A new table is created containing the gene ID, gene name, and tissue expression values.
+I created a table that contains:
+
+```text
+Gene ID | Gene Name | Tissue 1 | Tissue 2 | Tissue 3 | ...
+```
+
+Each value in the tissue columns is the median TPM expression for that gene.
 
 ```python
 gene_tissue_table = df[
@@ -104,61 +126,59 @@ gene_tissue_table = df[
 ].copy()
 ```
 
-The table has this structure:
-
-```text
-Name | Description | Brain | Liver | Heart | ...
-```
-
-This table represents the gene-to-tissue expression network that will be used for the rest of the project.
+This table is the main table I use for the analysis.
 
 ---
 
-### 4. Check the Data
+## 4. Check the Dataset
 
-Before doing calculations, I checked the data types and looked for missing values.
+Before doing calculations, I checked the structure of the data.
 
-The gene ID and gene name columns contain strings, while the tissue expression columns contain numeric values.
+I checked:
 
-I also checked for missing values using:
+- number of genes
+- number of tissues
+- column names
+- data types
+- missing values
+
+For missing values I used:
 
 ```python
 gene_tissue_table.isnull().sum()
 ```
 
-No missing values were found in the dataset.
+The dataset did not contain missing values.
 
 ---
 
-### 5. Find Genes With Zero Expression
+## 5. Find Genes With Zero Expression
 
-Some genes have a TPM value of 0 in every tissue.
+Even though there were no missing values, some genes had a TPM value of 0 in every tissue.
 
-To identify these genes, I first created a table containing only the tissue expression values:
+I checked this using:
 
 ```python
 expression_table = gene_tissue_table[tissue_cols]
+
+zero_genes = (
+    expression_table.sum(axis=1) == 0
+)
 ```
 
-Then I added the tissue values across each gene:
+This adds all tissue values for each gene.
 
-```python
-zero_genes = (expression_table.sum(axis=1) == 0)
-```
+If the total is 0, the gene has no expression in any tissue in the dataset.
 
-If the total expression for a gene is 0, this means that the gene has no expression in any of the tissues in this dataset.
-
-These genes are removed before normalization because dividing their expression by their total expression would require dividing by 0.
-
-They also do not provide information about tissue preference.
+These genes are removed because they do not give information about tissue expression and they cannot be normalized by dividing by their total expression.
 
 ---
 
-## Normalization
+## 6. Normalize Gene Expression
 
-### Why Normalize the Data?
+This is one of the most important parts of the analysis.
 
-Different genes can have very different overall TPM values.
+Some genes have very large TPM values while other genes have much smaller values.
 
 For example:
 
@@ -180,32 +200,34 @@ Liver = 3
 Heart = 1
 ```
 
-Gene A has much larger raw values, but both genes actually have the same expression pattern across the tissues.
+The values are very different, but both genes have the same expression pattern.
 
-If raw TPM values were used directly, Gene A could have much more influence on the analysis simply because its overall expression is higher.
+If I only used the original TPM values, Gene A could have much more influence just because its numbers are larger.
 
-To make the comparison more fair, each gene is normalized across all tissues.
+To make the comparison more fair, I convert the expression into relative values.
 
-The method used in this project follows the research writeup, which states that gene-to-tissue expression values should be converted into relative expression values so that the edges leaving each gene sum to 1.
-
-For each gene:
+For each gene I calculate:
 
 ```text
-Normalized expression =
-TPM in one tissue / Total TPM across all tissues
+relative expression =
+tissue TPM / total TPM for that gene
 ```
 
-For example:
+Example:
 
 ```text
 Brain = 10
 Liver = 30
 Heart = 10
-
-Total = 50
 ```
 
-After normalization:
+The total is:
+
+```text
+10 + 30 + 10 = 50
+```
+
+The normalized values become:
 
 ```text
 Brain = 10 / 50 = 0.20
@@ -216,14 +238,12 @@ Heart = 10 / 50 = 0.20
 The values now add up to:
 
 ```text
-0.20 + 0.60 + 0.20 = 1.00
+1.00
 ```
 
-The normalized values can also be understood as the relative distribution of that gene's expression across tissues.
+This means that the normalized values show how the expression of one gene is distributed across the tissues.
 
----
-
-### Normalization Code
+I calculated this using:
 
 ```python
 expression_table = gene_tissue_table[tissue_cols]
@@ -236,62 +256,66 @@ normalized_expression = expression_table.div(
 )
 ```
 
-The gene information is then added back to the normalized expression table:
+---
+
+## 7. Check the Normalization
+
+After normalization, I checked that the tissue values for every gene add up to 1.
+
+```python
+normalized_expression.sum(axis=1).head()
+```
+
+The result should be close to:
+
+```text
+1.0
+1.0
+1.0
+1.0
+1.0
+```
+
+This check confirms that the normalization worked correctly.
+
+---
+
+## 8. Create the Normalized Gene-Tissue Table
+
+After the normalization, I added the gene ID and gene name back to the table.
 
 ```python
 normalized_gene_tissue_table = pd.concat(
     [
-        gene_tissue_table[["Name", "Description"]].reset_index(drop=True),
-        normalized_expression.reset_index(drop=True)
+        gene_tissue_table[
+            ["Name", "Description"]
+        ].reset_index(drop=True),
+
+        normalized_expression.reset_index(
+            drop=True
+        )
     ],
     axis=1
 )
 ```
 
-The normalization is checked using:
-
-```python
-normalized_gene_tissue_table[tissue_cols].sum(axis=1).head()
-```
-
-Each gene should have a total close to:
+The final table looks like:
 
 ```text
-1.0
+Gene | Brain | Liver | Heart | ...
 ```
+
+but now the tissue values represent relative expression instead of raw TPM.
 
 ---
 
-## Tissue Score Calculation
+# Tissue Score
 
-After normalization, the next goal is to determine which tissues are most strongly associated with a selected group of genes.
+The next part of my analysis is to calculate a tissue score for a group of genes.
 
-The research writeup defines the tissue score as:
+The idea is to take a selected gene set and see which tissues have the strongest combined relative expression.
 
-```text
-S(T) = Σ wi × e(gi,T)
-```
-
-where:
-
-- `T` is a tissue
-- `gi` is one gene from the input gene set
-- `wi` is the weight assigned to that gene
-- `e(gi,T)` is the normalized expression of that gene in tissue `T`
-
-If no special gene weights are provided, the weight can default to:
-
-```text
-wi = 1
-```
-
-In that case, the tissue score is simply the sum of the normalized expression values for the selected genes.
-
----
-
-### Simple Example
-
-Assume there are two genes:
+For example:
 
 ```text
 Gene A
@@ -311,27 +335,25 @@ Liver = 0.10
 Heart = 0.70
 ```
 
-If both genes have weight 1, then:
+For brain:
 
 ```text
-Brain score
-= 0.20 + 0.20
-= 0.40
+0.20 + 0.20 = 0.40
 ```
+
+For liver:
 
 ```text
-Liver score
-= 0.60 + 0.10
-= 0.70
+0.60 + 0.10 = 0.70
 ```
+
+For heart:
 
 ```text
-Heart score
-= 0.20 + 0.70
-= 0.90
+0.20 + 0.70 = 0.90
 ```
 
-The result would be:
+The result is:
 
 ```text
 Heart = 0.90
@@ -341,25 +363,15 @@ Brain = 0.40
 
 This means that this group of genes has the strongest combined relative expression in the heart.
 
----
-
-### Tissue Score Code
-
-After selecting an input gene set:
+The code I use is:
 
 ```python
-selected_genes = normalized_gene_tissue_table[
-    normalized_gene_tissue_table["Description"].isin(input_genes)
-]
+tissue_scores = selected_genes[
+    tissue_cols
+].sum(axis=0)
 ```
 
-the tissue scores can be calculated using:
-
-```python
-tissue_scores = selected_genes[tissue_cols].sum(axis=0)
-```
-
-The tissues are then ranked from highest score to lowest:
+Then I sort the scores:
 
 ```python
 tissue_scores = tissue_scores.sort_values(
@@ -367,10 +379,12 @@ tissue_scores = tissue_scores.sort_values(
 )
 ```
 
-Finally, the scores are converted into a table:
+and create a table:
 
 ```python
-tissue_score_table = tissue_scores.reset_index()
+tissue_score_table = (
+    tissue_scores.reset_index()
+)
 
 tissue_score_table.columns = [
     "Tissue",
@@ -378,230 +392,82 @@ tissue_score_table.columns = [
 ]
 ```
 
-A higher tissue score means that the selected gene set has a stronger combined relative expression in that tissue.
+---
+
+# Connection With the Research Papers
+
+My analysis is not an exact reproduction of the Enrichr algorithm.
+
+Instead, I am using the papers to understand the ideas behind gene-set enrichment and then applying similar ideas to GTEx tissue expression data.
+
+The 2013 Enrichr paper shows that a list of genes can be analyzed together and compared with biological gene-set libraries.
+
+It also explains why statistical testing is needed to determine if an observed biological signal is stronger than what would normally happen by chance.
+
+The 2016 paper is especially useful because it includes GTEx gene-expression libraries and introduces fuzzy gene sets, where membership can have values between 0 and 1 instead of only 0 or 1.
+
+This is related to my normalized gene-tissue table because each gene has a relative expression value between 0 and 1 for each tissue.
 
 ---
 
-## Why Use a Selected Gene Set?
+# Next Steps
 
-The goal is not only to find which tissue has the highest expression across every human gene.
-
-Instead, the goal is to take a biologically meaningful group of genes and ask:
-
-> Which tissues are these genes most strongly associated with?
-
-The input genes could come from:
-
-- a GWAS study
-- disease-associated genes
-- genes from an experiment
-- differentially expressed genes
-- a biological pathway
-- a curated gene list
-
-This makes the tissue score useful for interpreting gene sets that may contain a tissue-specific signal.
-
----
-
-## Statistical Testing
-
-A high tissue score by itself does not tell us whether the score is unusual.
-
-For example, a tissue might naturally receive high scores from many different gene sets.
-
-The next step of the method is therefore to compare the real gene set against random gene sets.
-
-The research writeup proposes generating:
+The next steps of the analysis are:
 
 ```text
-1000 random gene sets
-```
-
-with the same number of genes as the real input set.
-
-For every random gene set:
-
-1. Select random genes.
-2. Calculate tissue scores using the same method.
-3. Store the random scores.
-4. Compare the real tissue score with the random distribution.
-
-This allows an empirical p-value to be calculated.
-
-Conceptually:
-
-```text
-Real gene set
-      ↓
-Real tissue score
-      ↓
-Compare with
-      ↓
-1000 random gene sets
-      ↓
-Random tissue scores
-      ↓
-Empirical p-value
-```
-
-A small empirical p-value would indicate that obtaining a tissue score that large by chance is uncommon.
-
-This statistical-testing section is the next stage of the project.
-
----
-
-## Relationship to Enrichr
-
-This research is related to the idea behind **gene-set enrichment analysis**.
-
-Enrichr takes a list of genes and compares that list with existing biological gene-set libraries to determine which terms, pathways, tissues, transcription factors, diseases, or other biological categories are enriched.
-
-The original Enrichr method uses several calculations, including:
-
-- Fisher's exact test
-- a rank-based z-score
-- a combined enrichment score
-
-The combined score described in the original Enrichr paper is:
-
-```text
-Combined Score = log(p-value) × z-score
-```
-
-The purpose is to combine information about statistical overlap with how unusually high a biological term ranks.
-
-The 2016 update to Enrichr also introduced the idea of **fuzzy gene sets**.
-
-Traditional gene sets use:
-
-```text
-0 = gene is not in the set
-1 = gene is in the set
-```
-
-A fuzzy gene set allows values between 0 and 1:
-
-```text
-0.0 = no membership
-0.4 = partial membership
-1.0 = full membership
-```
-
-This is relevant to this project because the normalized GTEx values also represent gene-to-tissue relationships using values between 0 and 1.
-
-However, the exact tissue-score calculation implemented in this project follows the research writeup provided for this project rather than directly reproducing the Enrichr scoring algorithm.
-
----
-
-## Research Workflow
-
-The current project workflow is:
-
-```text
-GTEx median TPM data
+Normalized gene-tissue table
         ↓
-Load and inspect data
-        ↓
-Create gene-tissue table
-        ↓
-Check missing values
-        ↓
-Identify genes with zero expression
-        ↓
-Remove all-zero genes
-        ↓
-Normalize each gene across tissues
-        ↓
-Verify each gene sums to 1
-        ↓
-Create normalized gene-tissue table
-        ↓
-Choose an input gene set
+Select a gene set
         ↓
 Calculate tissue scores
         ↓
-Rank tissues by score
+Rank tissues
         ↓
 Generate random gene sets
         ↓
-Calculate empirical p-values
+Calculate random tissue scores
         ↓
-Gene subnetwork analysis
+Compare real scores with random scores
+        ↓
+Calculate statistical significance
 ```
+
+The goal of the randomization step is to determine whether a high tissue score represents a real signal or something that could happen by chance.
 
 ---
 
-## Current Project Status
+# Current Progress
 
 Completed:
 
-- Loaded GTEx median TPM data
-- Identified gene and tissue columns
-- Created the gene-tissue table
-- Checked data types
-- Checked for missing values
-- Identified genes with zero expression across all tissues
-- Removed all-zero genes
-- Normalized gene expression across tissues
-- Verified that each normalized gene sums to 1
-- Created the normalized gene-tissue table
-- Implemented the first tissue-score calculation
-- Created a ranked tissue-score table
+- Load GTEx data
+- Identify gene and tissue columns
+- Create gene-tissue table
+- Check missing values
+- Find genes with zero expression
+- Remove all-zero genes
+- Normalize gene expression
+- Check that normalized values sum to 1
+- Create normalized gene-tissue table
+- Calculate tissue scores
+- Create ranked tissue-score table
 
-Next steps:
+Still working on:
 
-- Test tissue scoring using meaningful input gene sets
-- Generate random gene sets
-- Calculate empirical p-values
-- Study the distribution of tissue scores
-- Continue toward gene subnetwork analysis
-
----
-
-## Tools
-
-- Python
-- Pandas
-- NumPy
-- Jupyter Notebook
-- VS Code
-- Git
-- GitHub
+- selecting meaningful gene sets
+- random gene-set testing
+- statistical significance
+- additional enrichment analysis
+- comparing the results with methods described in the research papers
 
 ---
 
-## References
+# References
 
-### Enrichr — Original Paper
-
-Chen, E. Y., Tan, C. M., Kou, Y., et al.  
+Chen, E. Y., Tan, C. M., Kou, Y., et al. (2013).  
 **Enrichr: interactive and collaborative HTML5 gene list enrichment analysis tool.**  
-BMC Bioinformatics, 2013, 14:128.
+BMC Bioinformatics, 14:128.
 
-This paper describes the original Enrichr gene-set enrichment method, including Fisher's exact test, expected-rank correction, z-scores, combined enrichment scores, and gene-set libraries.
-
-### Enrichr — 2016 Update
-
-Kuleshov, M. V., Jones, M. R., Rouillard, A. D., et al.  
+Kuleshov, M. V., Jones, M. R., Rouillard, A. D., et al. (2016).  
 **Enrichr: a comprehensive gene set enrichment analysis web server 2016 update.**  
-Nucleic Acids Research, 2016, 44.
-
-This update expands Enrichr's gene-set libraries, adds GTEx-derived expression libraries, and introduces fuzzy gene-set enrichment where genes can have membership values between 0 and 1.
-
-### Research Method Writeup
-
-The tissue normalization, tissue-score calculation, randomization strategy, empirical p-value calculation, and planned gene subnetwork analysis in this repository follow the research writeup provided for this project.
-
----
-
-## Author
-
-**El Mehdi Bensouda**  
-Data Science Student  
-Duquesne University
-
----
-
-## Project Status
-
-This project is currently **in progress**.
+Nucleic Acids Research, 44, W90-W97.
